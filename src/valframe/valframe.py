@@ -152,11 +152,11 @@ def create_valframe_type(
 
         def __init__(self, data: pd.DataFrame):
             schema.validate(data)
-            super(self).__init__(data)
+            pd.DataFrame.__init__(self, data)
 
         ValFrame = type(
             name.capitalize(),
-            (pd.DataFrame),
+            (pd.DataFrame,),
             {
                 "__init__": __init__,
             },
@@ -168,11 +168,11 @@ def create_valframe_type(
 
         def __init__(self, data: pl.DataFrame):
             schema.validate(data)
-            super(self).__init__(data)
+            pl.DataFrame.__init__(self, data)
 
         ValFrame = type(
             name.capitalize(),
-            (pl.DataFrame),
+            (pl.DataFrame,),
             {
                 "__init__": __init__,
             },
