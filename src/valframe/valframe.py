@@ -108,68 +108,126 @@ def create_valframe_type(
             print("\n".join(self.error_messages))
 
         def __getitem__(self, key):
-            assert (
-                isinstance(key, tuple) and len(key) == 2
-            ), "key must be tuple of length 2"
+            # 1. Handle Empty Dataset
+            if not self.file_paths:
+                raise ValueError(
+                    "No valid data files were found to create the dataset."
+                )
+
+            # 2. Input and Column Key Validation
+            if not (isinstance(key, tuple) and len(key) == 2):
+                raise TypeError(
+                    "Indexing must be a tuple of length 2, e.g., `[rows, cols]`."
+                )
+
             row_key, col_key = key
+            schema_cols = set(self.schema.columns.keys())
 
-            if isinstance(row_key, slice):
-                start, step, stop = row_key.start, row_key.step, row_key.stop
-                start = start if start else 0
-                stop = stop if stop else np.max(self.cumulative_rows)
-                step = step if step else 1
+            if isinstance(col_key, str):
+                if col_key not in schema_cols:
+                    raise KeyError(f"Column '{col_key}' not found in schema.")
+            elif isinstance(col_key, list):
+                if not set(col_key).issubset(schema_cols):
+                    missing = set(col_key) - schema_cols
+                    raise KeyError(f"Columns {missing} not found in schema.")
 
-                first_file_index = np.argmax(self.cumulative_rows > start)
-                last_file_index = np.argmax(self.cumulative_rows > stop) + 1
+            total_rows = self.cumulative_rows[-1]
 
-                data = [
-                    FILE_FORMATS_TO_READ_METHOD[library][
-                        file_path.split(".")[-1].lower()
-                    ](
-                        file_path,
-                        **(self.read_kwargs if self.read_kwargs is not None else {}),
+            # 3. Handle Integer Indexing
+            if isinstance(row_key, int):
+                if not (0 <= row_key < total_rows):
+                    raise IndexError(
+                        f"Row index {row_key} is out of bounds for {total_rows} total rows."
                     )
-                    for file_path in self.file_paths[first_file_index:last_file_index]
-                ]
 
-                if self.lazy_validation:
-                    for data2 in data:
-                        self.schema.validate(data2)
-
-                if library == "polars":
-                    data = pl.concat(data, how="vertical")
-                elif library == "pandas":
-                    data = pd.concat(data, axis=0)
-
-                if start < self.cumulative_rows[0]:
-                    rel_start_index = start
-                else:
-                    rel_start_index = start - self.cumulative_rows[first_file_index - 1]
-
-                if stop < self.cumulative_rows[0]:
-                    rel_end_index = stop
-                else:
-                    rel_end_index = stop - self.cumulative_rows[first_file_index - 1]
-
-                if library == "polars":
-                    return data[rel_start_index:rel_end_index:step, col_key]  # type: ignore
-                elif library == "pandas":
-                    return data.iloc[rel_start_index:rel_end_index:step, col_key]  # type: ignore
-            elif isinstance(row_key, int):
-                file_index = np.argmax(self.cumulative_rows > row_key)
+                file_index = np.searchsorted(
+                    self.cumulative_rows, row_key, side="right"
+                )
                 file_path = self.file_paths[file_index]
                 file_format = file_path.split(".")[-1].lower()
-                data = FILE_FORMATS_TO_READ_METHOD[library][file_format](
+
+                data = FILE_FORMATS_TO_READ_METHOD[self.library][file_format](
                     file_path,
                     **(self.read_kwargs if self.read_kwargs is not None else {}),
                 )
+                if self.lazy_validation:
+                    self.schema.validate(data)
 
-                rel_index = row_key - self.cumulative_rows[file_index - 1]
+                rows_in_previous_files = (
+                    self.cumulative_rows[file_index - 1] if file_index > 0 else 0
+                )
+                relative_index = row_key - rows_in_previous_files
 
-                if library == "polars":
-                    return data[rel_index, col_key]
-                elif library == "pandas":
-                    return data.iloc[rel_index, col_key]
+                if self.library == "polars":
+                    return data[relative_index, col_key]
+                elif self.library == "pandas":
+                    # By selecting with [[...]], we ensure the result is a DataFrame,
+                    # making its behavior consistent with the slice case.
+                    return data.iloc[[relative_index]].loc[:, col_key]
+
+            # 4. Handle Slice Indexing
+            elif isinstance(row_key, slice):
+                start = row_key.start if row_key.start is not None else 0
+                stop = row_key.stop if row_key.stop is not None else total_rows
+                step = row_key.step if row_key.step is not None else 1
+
+                # The `stop=0` edge case is handled here, preventing `stop - 1` from becoming negative.
+                if start >= stop:
+                    empty_df_reader = FILE_FORMATS_TO_READ_METHOD[self.library][
+                        self.file_paths[0].split(".")[-1].lower()
+                    ]
+                    if self.library == "pandas":
+                        return empty_df_reader(self.file_paths[0], nrows=0).loc[
+                            :, col_key
+                        ]
+                    else:
+                        return empty_df_reader(self.file_paths[0], n_rows=0)[:, col_key]
+
+                first_file_index = np.searchsorted(
+                    self.cumulative_rows, start, side="right"
+                )
+                last_file_index = np.searchsorted(
+                    self.cumulative_rows, stop - 1, side="right"
+                )
+                files_to_read = self.file_paths[first_file_index : last_file_index + 1]
+
+                # This check is technically redundant if `start < stop` but is good for safety.
+                if not files_to_read:
+                    raise IndexError("Slice is out of bounds.")
+
+                data_parts = [
+                    FILE_FORMATS_TO_READ_METHOD[self.library][
+                        fp.split(".")[-1].lower()
+                    ](fp, **(self.read_kwargs if self.read_kwargs is not None else {}))
+                    for fp in files_to_read
+                ]
+
+                if self.lazy_validation:
+                    for part in data_parts:
+                        self.schema.validate(part)
+
+                if self.library == "polars":
+                    data = pl.concat(data_parts, how="vertical")
+                elif self.library == "pandas":
+                    data = pd.concat(data_parts, axis=0, ignore_index=True)
+
+                rows_before_concat = (
+                    self.cumulative_rows[first_file_index - 1]
+                    if first_file_index > 0
+                    else 0
+                )
+                relative_start = start - rows_before_concat
+                relative_stop = stop - rows_before_concat
+
+                if self.library == "polars":
+                    return data[relative_start:relative_stop:step, col_key]  # type: ignore
+                elif self.library == "pandas":
+                    return data.iloc[relative_start:relative_stop:step].loc[:, col_key]  # type: ignore
+
+            else:
+                raise TypeError(
+                    f"Row key must be an integer or a slice, not {type(row_key)}."
+                )
 
         ValFrame = type(
             name.capitalize(), (), {"__init__": __init__, "__getitem__": __getitem__}
