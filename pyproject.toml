@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "valframe"
+version = "0.0.0.1"
+authors = [
+    { name = "Leon Luithlen", email = "leontimnaluithlen@gmail.com" },
+]
+description = "Create validation classes for your data"
+readme = "README.md"
+license = { text = "BSD 3-Clause" }
+keywords = ["data validation", "data quality", "pandas", "polars", "dataframe"]
+requires-python = ">=3.10"
+classifiers = []
+
+dependencies = [
+    "polars>=1.31.0,<2.0",
+    "numpy>=1.23,<2.0",
+    "pandas>=2.0.0",
+    "pandera>=0.23.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/0xideas/valframe"
+Repository = "https://github.com/0xideas/valframe"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.2,<8.0"
+]
