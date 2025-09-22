@@ -19,7 +19,7 @@ jobs:
             'numpy': '2.2.1'
           },
           {
-            'numpy': '1.24.0',
+            'numpy': '1.24.4',
           },
           {
             'numpy': 'latest'
