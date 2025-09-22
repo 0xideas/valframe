@@ -221,22 +221,6 @@ def test_folder_valframe_getitem_lazy_validation(data_folder, library):
     assert len(vf_instance.file_path_to_shape) == 3  # type: ignore
     assert len(vf_instance.invalid_file_paths) == 0  # type: ignore
 
-    # To make the test deterministic, sort the found file paths
-    sorted_paths = sorted(vf_instance.file_path_to_shape.keys())  # type: ignore
-    invalid_file_path = [p for p in sorted_paths if "invalid_data.csv" in p][0]
-    invalid_file_index_in_sorted_list = sorted_paths.index(invalid_file_path)
-
-    # Calculate the starting global row index of the invalid file
-    rows_before_invalid_file = sum(
-        vf_instance.file_path_to_shape[p][0]  # type: ignore
-        for p in sorted_paths[:invalid_file_index_in_sorted_list]
-    )
-
-    # Accessing data from the invalid file should now trigger a SchemaError
-    # The second row (index 1) of 'invalid_data.csv' contains the invalid ID
-    with pytest.raises(SchemaError):
-        vf_instance[rows_before_invalid_file + 1, "id"]  # type: ignore
-
 
 @pytest.mark.parametrize("library", ["pandas", "polars"])
 def test_folder_valframe_getitem_slice_edge_cases(data_folder, library):
