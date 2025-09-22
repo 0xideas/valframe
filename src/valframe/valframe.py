@@ -86,13 +86,28 @@ def create_valframe_type(
                                     file_path,
                                     **(read_kwargs if read_kwargs is not None else {}),
                                 )
-                                if not self.lazy_validation:
-                                    schema.validate(data)
-                                self.file_path_to_shape[file_path] = data.shape
                             except Exception as e:
                                 self.invalid_file_paths.append(file_path)
-                                error_message = f"reading data or valframe schema validation failed for {file_path}: {e}"
+                                error_message = (
+                                    f"reading data failed for {file_path}: {e}"
+                                )
                                 self.error_messages.append(error_message)
+                                continue  # Skip to the next file
+
+                            # Now, handle validation based on the lazy_validation flag
+                            if self.lazy_validation:
+                                # In lazy mode, we assume the file is valid for now and just store its shape.
+                                # Validation will happen on access in __getitem__.
+                                self.file_path_to_shape[file_path] = data.shape
+                            else:
+                                # In eager mode, validate immediately.
+                                try:
+                                    schema.validate(data)
+                                    self.file_path_to_shape[file_path] = data.shape
+                                except Exception as e:
+                                    self.invalid_file_paths.append(file_path)
+                                    error_message = f"valframe schema validation failed for {file_path}: {e}"
+                                    self.error_messages.append(error_message)
 
                     if (
                         max_errors is not None
