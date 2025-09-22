@@ -19,7 +19,7 @@ dependencies = [
     "polars>=1.31.0,<2.0",
     "numpy>=1.23,<2.0",
     "pandas>=2.0.0",
-    "pandera>=0.23.0"
+    "pandera[polars]>=0.23.0"
 ]
 
 [project.urls]

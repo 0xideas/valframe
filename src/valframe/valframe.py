@@ -1,9 +1,10 @@
 import os
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
 import pandera.pandas as pa
+import pandera.polars as pal
 import polars as pl
 from beartype import beartype
 
@@ -19,7 +20,7 @@ FILE_FORMATS_TO_READ_METHOD = {
 @beartype
 def create_valframe_type(
     name: str,
-    schema: pa.DataFrameSchema,
+    schema: Union[pa.DataFrameSchema, pal.DataFrameSchema],
     library: str = "polars",
     folder: bool = False,
     nested_level: int = 0,
@@ -159,7 +160,7 @@ def create_valframe_type(
                 relative_index = row_key - rows_in_previous_files
 
                 if self.library == "polars":
-                    return data[relative_index, col_key]
+                    return data[int(relative_index), col_key]
                 elif self.library == "pandas":
                     # By selecting with [[...]], we ensure the result is a DataFrame,
                     # making its behavior consistent with the slice case.
