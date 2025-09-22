@@ -22,6 +22,10 @@ jobs:
             'numpy': 'latest'
           }
         ]
+        exclude:
+          - python-version: '3.13'
+            dependency-set: {'numpy': '2.0.0'}
+
 
     name: ${{ matrix.os }} - Python ${{ matrix.python-version }} - Dependencies ${{ toJSON(matrix.dependency-set) }}
 
