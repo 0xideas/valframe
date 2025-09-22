@@ -172,3 +172,140 @@ def test_create_valframe_type_assertions():
         create_valframe_type(
             "Test", PANDAS_SCHEMA, folder=True, input_file_formats=None
         )
+
+
+@pytest.fixture
+def empty_folder(tmp_path):
+    """Creates an empty temporary folder for testing."""
+    return tmp_path
+
+
+@pytest.mark.parametrize("library", ["pandas", "polars"])
+def test_folder_valframe_getitem_errors(data_folder, empty_folder, library):
+    """Tests various indexing errors for folder-based ValFrames."""
+    FolderValFrame = create_valframe_type(
+        "FolderValFrame",
+        PANDAS_SCHEMA if library == "pandas" else POLARS_SCHEMA,
+        library=library,
+        folder=True,
+        input_file_formats=["csv"],
+    )
+    vf_instance = FolderValFrame(str(data_folder))  # type: ignore
+
+    # Test TypeError for invalid key type (e.g., not a tuple)
+    with pytest.raises(TypeError, match="Indexing must be a tuple"):
+        vf_instance[0]  # type: ignore
+
+    # Test KeyError for a column not present in the schema
+    with pytest.raises(KeyError, match="not found in schema"):
+        vf_instance[0, "age"]  # type: ignore
+
+    # Test IndexError for a row index that is out of bounds
+    with pytest.raises(IndexError, match="out of bounds"):
+        vf_instance[99, "id"]  # type: ignore
+
+
+@pytest.mark.parametrize("library", ["pandas", "polars"])
+def test_folder_valframe_getitem_lazy_validation(data_folder, library):
+    """Tests that validation errors are raised on access when lazy_validation=True."""
+    FolderValFrame = create_valframe_type(
+        "FolderValFrame",
+        PANDAS_SCHEMA if library == "pandas" else POLARS_SCHEMA,
+        library=library,
+        folder=True,
+        input_file_formats=["csv"],
+        lazy_validation=True,  # Defer validation until access
+    )
+    # Initialization should succeed, finding all 3 files without validation
+    vf_instance = FolderValFrame(str(data_folder))  # type: ignore
+    assert len(vf_instance.file_path_to_shape) == 3  # type: ignore
+    assert len(vf_instance.invalid_file_paths) == 0  # type: ignore
+
+    # To make the test deterministic, sort the found file paths
+    sorted_paths = sorted(vf_instance.file_path_to_shape.keys())  # type: ignore
+    invalid_file_path = [p for p in sorted_paths if "invalid_data.csv" in p][0]
+    invalid_file_index_in_sorted_list = sorted_paths.index(invalid_file_path)
+
+    # Calculate the starting global row index of the invalid file
+    rows_before_invalid_file = sum(
+        vf_instance.file_path_to_shape[p][0]  # type: ignore
+        for p in sorted_paths[:invalid_file_index_in_sorted_list]
+    )
+
+    # Accessing data from the invalid file should now trigger a SchemaError
+    # The second row (index 1) of 'invalid_data.csv' contains the invalid ID
+    with pytest.raises(SchemaError):
+        vf_instance[rows_before_invalid_file + 1, "id"]  # type: ignore
+
+
+@pytest.mark.parametrize("library", ["pandas", "polars"])
+def test_folder_valframe_getitem_slice_edge_cases(data_folder, library):
+    """Tests edge cases for slice indexing, like empty slices and steps."""
+    FolderValFrame = create_valframe_type(
+        "FolderValFrame",
+        PANDAS_SCHEMA if library == "pandas" else POLARS_SCHEMA,
+        library=library,
+        folder=True,
+        input_file_formats=["csv"],
+    )
+    vf_instance = FolderValFrame(str(data_folder))  # type: ignore
+
+    # Test an empty slice
+    empty_result = vf_instance[2:2, :]  # type: ignore
+    assert empty_result.shape[0] == 0
+
+    # Test open-ended slices
+    start_slice = vf_instance[:2, :]  # type: ignore
+    assert start_slice.shape[0] == 2
+    end_slice = vf_instance[2:, :]  # type: ignore
+    assert end_slice.shape[0] == 2
+
+    # Test a slice with a step, which should select every other row
+    stepped_slice = vf_instance[0:4:2, ["id"]]  # type: ignore
+    assert stepped_slice.shape[0] == 2
+
+    # The valid IDs are [1, 2, 3, 4]. A step of 2 retrieves rows with IDs 1 and 3.
+    # We sort the result to ensure the test is deterministic regardless of file read order.
+    retrieved_ids = sorted(stepped_slice["id"].to_list())
+    assert retrieved_ids == [1, 3]
+
+
+def test_folder_valframe_getitem_return_types(data_folder):
+    """Tests that __getitem__ returns the expected types for pandas and polars."""
+    # --- Pandas Test ---
+    PandasFolderValFrame = create_valframe_type(
+        "PandasFolderValFrame",
+        PANDAS_SCHEMA,
+        library="pandas",
+        folder=True,
+        input_file_formats=["csv"],
+    )
+    pvf = PandasFolderValFrame(str(data_folder))  # type: ignore
+
+    # Integer index with a single column name (str) should return a Series
+    res_pd_series = pvf[0, "id"]  # type: ignore
+    assert isinstance(res_pd_series, pd.Series)
+
+    # Integer index with a list of columns should return a DataFrame
+    res_pd_df = pvf[0, ["id"]]  # type: ignore
+    assert isinstance(res_pd_df, pd.DataFrame)
+    assert res_pd_df.shape == (1, 1)
+
+    # --- Polars Test ---
+    PolarsFolderValFrame = create_valframe_type(
+        "PolarsFolderValFrame",
+        POLARS_SCHEMA,
+        library="polars",
+        folder=True,
+        input_file_formats=["csv"],
+    )
+    plvf = PolarsFolderValFrame(str(data_folder))  # type: ignore
+
+    # Integer index with a single column name (str) should return a scalar value
+    res_pl_scalar = plvf[0, "id"]  # type: ignore
+    assert isinstance(res_pl_scalar, int)
+
+    # Integer index with a list of columns should return a DataFrame
+    res_pl_df = plvf[0, ["id", "name"]]  # type: ignore
+    assert isinstance(res_pl_df, pl.DataFrame)
+    assert res_pl_df.shape == (1, 2)
