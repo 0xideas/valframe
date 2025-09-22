@@ -7,7 +7,7 @@ import pandera.pandas as pa
 import polars as pl
 from beartype import beartype
 
-SUPPORTED_FILE_FORMATS = ["str", "parquet"]
+SUPPORTED_FILE_FORMATS = ["csv", "parquet"]
 SUPPORTED_LIBRARIES = ["polars", "pandas"]
 
 FILE_FORMATS_TO_READ_METHOD = {
@@ -26,6 +26,7 @@ def create_valframe_type(
     input_file_formats: Optional[list[str]] = None,
     read_kwargs: Optional[dict[str, Any]] = None,
     max_errors: Optional[int] = 10,
+    lazy_validation: bool = False,
 ):
     assert (
         library in SUPPORTED_LIBRARIES
@@ -52,7 +53,7 @@ def create_valframe_type(
 
     if folder:
 
-        def __init__(self, name: str, path: str):  # type: ignore
+        def __init__(self, path: str):  # type: ignore
             assert path.startswith("..") is False
 
             self.path = path
@@ -61,6 +62,7 @@ def create_valframe_type(
             self.nested_level = nested_level
             self.input_file_formats = input_file_formats
             self.read_kwargs = read_kwargs
+            self.lazy_validation = lazy_validation
 
             self.invalid_file_paths, self.error_messages = [], []
             self.file_path_to_shape = {}
@@ -79,8 +81,12 @@ def create_valframe_type(
                             try:
                                 data = FILE_FORMATS_TO_READ_METHOD[library][
                                     file_format
-                                ](file_path, **read_kwargs)
-                                schema.validate(data)
+                                ](
+                                    file_path,
+                                    **(read_kwargs if read_kwargs is not None else {}),
+                                )
+                                if not self.lazy_validation:
+                                    schema.validate(data)
                                 self.file_path_to_shape[file_path] = data.shape
                             except Exception as e:
                                 self.invalid_file_paths.append(file_path)
@@ -96,9 +102,10 @@ def create_valframe_type(
             cumulative, row_index_file_tuples = 0, []
             for file_path, shape in self.file_path_to_shape.items():
                 cumulative += shape[0]
-                row_index_file_tuples.append((cumulative, file_path))
+                row_index_file_tuples.append((file_path, cumulative))
             self.file_paths, cumulative_rows = zip(*row_index_file_tuples)
             self.cumulative_rows = np.array(cumulative_rows)
+            print("\n".join(self.error_messages))
 
         def __getitem__(self, key):
             assert (
@@ -108,22 +115,42 @@ def create_valframe_type(
 
             if isinstance(row_key, slice):
                 start, step, stop = row_key.start, row_key.step, row_key.stop
+                start = start if start else 0
+                stop = stop if stop else np.max(self.cumulative_rows)
+                step = step if step else 1
+
                 first_file_index = np.argmax(self.cumulative_rows > start)
-                last_file_index = np.argmax(self.cumulative_rows > stop)
+                last_file_index = np.argmax(self.cumulative_rows > stop) + 1
 
                 data = [
                     FILE_FORMATS_TO_READ_METHOD[library][
                         file_path.split(".")[-1].lower()
-                    ](file_path, **self.read_kwargs)
+                    ](
+                        file_path,
+                        **(self.read_kwargs if self.read_kwargs is not None else {}),
+                    )
                     for file_path in self.file_paths[first_file_index:last_file_index]
                 ]
+
+                if self.lazy_validation:
+                    for data2 in data:
+                        self.schema.validate(data2)
+
                 if library == "polars":
                     data = pl.concat(data, how="vertical")
                 elif library == "pandas":
                     data = pd.concat(data, axis=0)
 
-                rel_start_index = start - self.cumulative_rows[first_file_index]
-                rel_end_index = stop - self.cumulative_rows[first_file_index]
+                if start < self.cumulative_rows[0]:
+                    rel_start_index = start
+                else:
+                    rel_start_index = start - self.cumulative_rows[first_file_index - 1]
+
+                if stop < self.cumulative_rows[0]:
+                    rel_end_index = stop
+                else:
+                    rel_end_index = stop - self.cumulative_rows[first_file_index - 1]
+
                 if library == "polars":
                     return data[rel_start_index:rel_end_index:step, col_key]  # type: ignore
                 elif library == "pandas":
@@ -133,7 +160,8 @@ def create_valframe_type(
                 file_path = self.file_paths[file_index]
                 file_format = file_path.split(".")[-1].lower()
                 data = FILE_FORMATS_TO_READ_METHOD[library][file_format](
-                    file_path, **self.read_kwargs
+                    file_path,
+                    **(self.read_kwargs if self.read_kwargs is not None else {}),
                 )
 
                 rel_index = row_key - self.cumulative_rows[file_index - 1]
