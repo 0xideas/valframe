@@ -16,10 +16,7 @@ jobs:
         python-version: ['3.10', '3.11', '3.12', '3.13']
         dependency-set: [
           {
-            'numpy': '2.2.1'
-          },
-          {
-            'numpy': '1.24.4',
+            'numpy': '2.0.0'
           },
           {
             'numpy': 'latest'
