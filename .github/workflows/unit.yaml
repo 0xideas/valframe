@@ -1,0 +1,80 @@
+name: Python Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        dependency-set: [
+          {
+            'numpy': '2.2.1'
+          },
+          {
+            'numpy': '1.24.0',
+          },
+          {
+            'numpy': 'latest'
+          }
+        ]
+
+    name: ${{ matrix.os }} - Python ${{ matrix.python-version }} - Dependencies ${{ toJSON(matrix.dependency-set) }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      shell: bash
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        uv pip install pytest pandas polars pandera beartype --system
+
+        if [ "${{ matrix.dependency-set.numpy }}" != "latest" ]; then
+          uv pip install "numpy==${{ matrix.dependency-set.numpy }}" --system
+        else
+          uv pip install "numpy" --system
+        fi
+
+        uv pip install -e . --system
+
+    - name: Show installed versions
+      run: |
+        pip list
+
+    - name: Run tests
+      run: |
+        pytest tests
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pytest-results-${{ matrix.os }}-py${{ matrix.python-version }}-${{ hashFiles('pip list') }}
+        path: |
+          .pytest_cache
+          test-reports/
+
+    - name: Report dependency versions
+      if: always()
+      run: |
+        echo "OS: ${{ matrix.os }}" >> $GITHUB_STEP_SUMMARY
+        echo "Python version: ${{ matrix.python-version }}" >> $GITHUB_STEP_SUMMARY
+        echo "Dependency versions:" >> $GITHUB_STEP_SUMMARY
+        pip list >> $GITHUB_STEP_SUMMARY
