@@ -94,6 +94,7 @@ import pandas as pd
 import pandera.pandas as pa
 from beartype import beartype
 from valframe import create_valframe_type
+from beartype.roar import BeartypeCallHintParamViolation
 
 # 1. Define a strict schema for transaction data
 TransactionSchema = pa.DataFrameSchema(
@@ -141,7 +142,16 @@ if __name__ == "__main__":
 
     print("-" * 20)
 
-    # b) Create an invalid DataFrame
+    # b) Pass a valid DataFrame with of an invalid type (so it's validity isn't verified)
+    try:
+        # This line will fail due to the @beartype check
+        total = process_payouts(valid_data)
+    except BeartypeCallHintParamViolation as e:
+        print("Failed to run process_payouts: passing a normal DataFrame object is not allowed")
+
+    print("-" * 20)
+
+    # c) Create an invalid DataFrame
     invalid_data = pd.DataFrame({
         "transaction_id": ["txn_789", "inv_000"], # "inv_000" is invalid
         "amount_usd": [99.99, 50.00],
